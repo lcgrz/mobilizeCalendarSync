@@ -27,7 +27,7 @@ const SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
 // created automatically when the authorization flow completes for the first
 // time.
 const TOKEN_PATH = 'token.json';
-const MAX_RESULTS = 1;
+const MAX_RESULTS = 10;
 const MOBILIZE_BASE_URL = 'https://api.mobilize.us/v1/organizations/2529/events';
 
 // Load client secrets from a local file.
@@ -41,7 +41,19 @@ listMobilizeEvents(MOBILIZE_BASE_URL)
 .then(data => {  
   _.forEach(data.data, (event) => {
     _.forEach(event.timeslots, (timeslot) => {
-      console.log({'title': event.title, 'timeslot': timeslot});
+      console.log({
+        'title': event.title, 
+        'summary': event.summary,
+        'description': event.description,
+        'organization_id': event.sponsor.id,
+        'organization_name': event.sponsor.name,
+        'timeslot': timeslot,
+        'location': event.location,
+        'timezone': event.timezone,
+        'event_type': event.event_type,
+        'browser_url': event.browser_url,
+        'contact': event.contact
+      });
     })
 
   });
