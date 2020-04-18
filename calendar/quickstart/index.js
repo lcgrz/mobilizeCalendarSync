@@ -41,14 +41,34 @@ listMobilizeEvents(MOBILIZE_BASE_URL)
 .then(data => {  
   _.forEach(data.data, (event) => {
     _.forEach(event.timeslots, (timeslot) => {
+      var start_date = new Date(timeslot.start_date * 1000); 
+      var end_date = new Date(timeslot.end_date * 1000);
+      var {venue, address_lines, locality, region, country, postal_code} = event.location || {};
+      // console.log(event.location);
+
+      var address = '';
+      if(address_lines && address_lines.length)
+      {
+        if(address_lines.length > 1 && address_lines[1].length) {
+          address = _.join(address_lines, ' ');
+        } else {
+          address = address_lines[0];
+        }
+      }
+
+      var location = (venue ? `${venue}, ` : '') + (address ? `${address}, ` : '') +
+                      `${locality}, ${region} ${postal_code}, ${country}`;
+
       console.log({
         'title': event.title, 
         'summary': event.summary,
         'description': event.description,
         'organization_id': event.sponsor.id,
         'organization_name': event.sponsor.name,
-        'timeslot': timeslot,
-        'location': event.location,
+        'timeslot_id': timeslot.id,
+        'start_date': start_date.toUTCString(),
+        'end_date': end_date.toUTCString(),
+        'location': location,
         'timezone': event.timezone,
         'event_type': event.event_type,
         'browser_url': event.browser_url,
