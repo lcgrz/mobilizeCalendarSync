@@ -4,7 +4,9 @@
   "description": "A simple Node.js command-line application that makes requests to the Google Calendar API.",
   "private": true,
   "dependencies": {
-    "googleapis": "^39.0.0"
+    "axios": "^0.19.2",
+    "googleapis": "^39.0.0",
+    "lodash": "^4.17.15"
   },
   "devDependencies": {},
   "engines": {

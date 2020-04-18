@@ -15,9 +15,11 @@
  * limitations under the License.
  */
 // [START calendar_quickstart]
+const axios = require('axios');
 const fs = require('fs');
 const readline = require('readline');
 const {google} = require('googleapis');
+const _ = require('lodash');
 
 // If modifying these scopes, delete token.json.
 const SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
@@ -25,6 +27,8 @@ const SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
 // created automatically when the authorization flow completes for the first
 // time.
 const TOKEN_PATH = 'token.json';
+const MAX_RESULTS = 1;
+const MOBILIZE_BASE_URL = 'https://api.mobilize.us/v1/organizations/2529/events';
 
 // Load client secrets from a local file.
 fs.readFile('credentials.json', (err, content) => {
@@ -32,6 +36,18 @@ fs.readFile('credentials.json', (err, content) => {
   // Authorize a client with credentials, then call the Google Calendar API.
   authorize(JSON.parse(content), listEvents);
 });
+
+listMobilizeEvents(MOBILIZE_BASE_URL)
+.then(data => {  
+  _.forEach(data.data, (event) => {
+    _.forEach(event.timeslots, (timeslot) => {
+      console.log({'title': event.title, 'timeslot': timeslot});
+    })
+
+  });
+});
+
+
 
 /**
  * Create an OAuth2 client with the given credentials, and then execute the
@@ -84,7 +100,7 @@ function getAccessToken(oAuth2Client, callback) {
 }
 
 /**
- * Lists the next 10 events on the user's primary calendar.
+ * Lists the next MAX_RESULTS events on the user's primary calendar.
  * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
  */
 function listEvents(auth) {
@@ -92,22 +108,29 @@ function listEvents(auth) {
   calendar.events.list({
     calendarId: 'primary',
     timeMin: (new Date()).toISOString(),
-    maxResults: 10,
+    maxResults: MAX_RESULTS,
     singleEvents: true,
     orderBy: 'startTime',
   }, (err, res) => {
     if (err) return console.log('The API returned an error: ' + err);
-    const events = res.data.items;
+    const events = res.data.items;``
     if (events.length) {
-      console.log('Upcoming 10 events:');
+      console.log(`Upcoming ${MAX_RESULTS} events:`);
       events.map((event, i) => {
         const start = event.start.dateTime || event.start.date;
-        console.log(`${start} - ${event.summary}`);
+        console.log('event', event);
       });
     } else {
       console.log('No upcoming events found.');
     }
   });
+}
+
+function listMobilizeEvents(url) {
+  return axios.get(url).then(response => {
+    // returning the data here allows the caller to get it through another .then(...)
+    return response.data
+  })
 }
 // [END calendar_quickstart]
 
