@@ -38,26 +38,26 @@ fs.readFile('credentials.json', (err, content) => {
   authorize(JSON.parse(content), insertMobilizeEvents);
 });
 
-
-
 async function insertMobilizeEvents(auth) {
   console.log('insertMobilizeEvents');
-  var {data} = await getMobilizeEvents();
-
-  var events = [];
-  events.push(data.data[3]);
-
+  var events = await getMobilizeEvents();
   console.log('events', events);
 
   _.forEach(events, (event) => {
-    destructureEvent(event, auth);
+    console.log(event.title);
+    if(!(event.title.toLowerCase().includes('maine') || event.title.toLowerCase().includes('susan collins'))) {
+      return;
+    }
+    _.forEach(event.timeslots, (timeslot) => {
+      var flattenedEvent = getDestructuredEvent(event, timeslot);
+      //console.log('flattenedEvent', flattenedEvent);
+
+      createOrUpdateGoogleEvent(auth, flattenedEvent);
+    });
   });
 }
 
-
-
-function destructureEvent(event, auth) {
-  _.forEach(event.timeslots, (timeslot) => {
+function getDestructuredEvent(event, timeslot) {
     var start_date = new Date(timeslot.start_date * 1000);
     var end_date = new Date(timeslot.end_date * 1000);
     var created_date = new Date(event.created_date * 1000);
@@ -73,18 +73,17 @@ function destructureEvent(event, auth) {
         address = address_lines[0];
       }
     }
+
     var location = '';
     if (venue.includes('private')) {
-      location = venue;
-    }
-    else {
-      location = (venue ? `${venue}, ` : '') +
+      location = (venue && !venue.includes('private') ? `${venue}, ` : '') +
         (address ? `${address}, ` : '') +
         (locality ? `${locality}, ` : '') +
         (region ? `${region} ` : '') +
         (postal_code ? `${postal_code}, ` : '') +
         (country ? `${country}` : '');
     }
+
     var flattenedEvent = {
       'id': event.id,
       'title': event.title,
@@ -105,9 +104,7 @@ function destructureEvent(event, auth) {
     };
     console.log('flattenedEvent', flattenedEvent);
 
-
-    createGoogleEvent(auth, flattenedEvent);
-  });
+    return flattenedEvent;
 }
 
 /**
@@ -163,11 +160,14 @@ function getAccessToken(oAuth2Client, callback) {
 }
 
 async function getGoogleEvent(auth, eventId) {
-
   const calendar = google.calendar({version: 'v3', auth});
   return calendar.events.get({
     calendarId: 'primary',
     eventId: eventId
+  })
+  .then((response) => {
+    //console.log('getGoogleEvent', response);
+    return response.data;
   });
 }
 /**
@@ -197,11 +197,47 @@ function listGoogleEvents(auth) {
   });
 }
 
-async function getMobilizeEvents() {
-  return axios.get('https://api.mobilize.us/v1/organizations/2529/events?timeslot_start=gte_now');
+async function getMobilizeEvents(index) {
+  return axios.get('https://api.mobilize.us/v1/organizations/2529/events?timeslot_start=gte_now')
+          .then((response) => {
+              if(typeof index !== 'undefined') {
+                return [response.data.data[index]];
+              } else {
+                return response.data.data;
+              }
+          });
 }
 
-async function createGoogleEvent(auth, mobilizeEvent) {
+async function createOrUpdateGoogleEvent(auth, mobilizeEvent) {
+  var event = createGoogleEvent(mobilizeEvent);
+
+
+  try {
+    var data = await getGoogleEvent(auth, event.id);
+    console.log('getGoogleEvent', data);
+
+    if(data.extendedProperties.modified_date != event.modified_date) {     
+      var updatedEvent = updateGoogleEvent(auth, event);
+      console.log('updatedEvent', updatedEvent);
+    } else {
+      console.log(`Event ${event.id} has not changed.`)
+    }
+  } catch(error) {
+    //console.log(`Error retrieving event ${event.id}.`, response);
+    console.log('error', `${error.response.status}: ${error.response.statusText}`);
+
+    if(error.response.status == 404) {
+      console.log(' Inserting new event...');
+      var insertedEvent = await insertGoogleEvent(auth, event);
+      console.log('insertedEvent', insertedEvent);
+    } else {
+      // do an update here if the modified_date is different that that on the extendedProperties
+      console.log('And unknown error occurred: ', error.response);
+    }
+  }
+}
+
+function createGoogleEvent(mobilizeEvent) {
   var event = {
     'id': `eid${mobilizeEvent.id}tsid${mobilizeEvent.timeslot_id}`,
     'summary': mobilizeEvent.title,
@@ -231,29 +267,25 @@ async function createGoogleEvent(auth, mobilizeEvent) {
         'modified_date': mobilizeEvent.modified_date
       }
     }
-    // 'organizer': {
-    //   'email': string,
-    //   'displayName': string,
-    // }  
   };
 
   //console.log(event);
-  try {
-    var {data} = await getGoogleEvent(auth, event.id);
-    console.log('response', data);
-  } catch(error) {
-    console.log(`Event ${event.id} not found`);
-    console.log('error', `${error.response.status}: ${error.response.statusText}`);
 
-    if(error.response.status == 404) {
-      var response = await insertGoogleEvent(auth, event);
-      console.log('new event', response.data);
-    } else {
-      // do an update here if the modified_date is different that that on the extendedProperties
-    }
-  }
+  return event;
 }
-// [END calendar_quickstart]
+
+async function updateGoogleEvent(auth, event) {
+  const calendar = google.calendar({ version: 'v3', auth });
+  return calendar.events.update({
+    auth: auth,
+    calendarId: 'primary',
+    resource: event,
+  })
+  .then((response) => { 
+    console.log('update response'); 
+    return response.data;
+  });
+}
 
 module.exports = {
   SCOPES,
@@ -265,6 +297,7 @@ async function insertGoogleEvent(auth, event) {
     auth: auth,
     calendarId: 'primary',
     resource: event,
-  });
+  })
+  .then((response) => {return response.data});
 }
 
