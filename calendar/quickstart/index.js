@@ -45,7 +45,7 @@ async function insertMobilizeEvents(auth) {
   var {data} = await getMobilizeEvents();
 
   var events = [];
-  events.push(_.first(data.data));
+  events.push(data.data[3]);
 
   console.log('events', events);
 
@@ -60,6 +60,9 @@ function destructureEvent(event, auth) {
   _.forEach(event.timeslots, (timeslot) => {
     var start_date = new Date(timeslot.start_date * 1000);
     var end_date = new Date(timeslot.end_date * 1000);
+    var created_date = new Date(event.created_date * 1000);
+    var modified_date = new Date(event.modified_date * 1000);
+
     var { venue, address_lines, locality, region, country, postal_code } = event.location || {};
     var address = '';
     if (address_lines && address_lines.length) {
@@ -87,6 +90,8 @@ function destructureEvent(event, auth) {
       'title': event.title,
       'summary': event.summary,
       'description': event.description,
+      'created_date': created_date.toISOString(),
+      'modified_date': modified_date.toISOString(),
       'organization_id': event.sponsor.id,
       'organization_name': event.sponsor.name,
       'timeslot_id': timeslot.id,
@@ -101,7 +106,7 @@ function destructureEvent(event, auth) {
     console.log('flattenedEvent', flattenedEvent);
 
 
-    createEvent(auth, flattenedEvent);
+    createGoogleEvent(auth, flattenedEvent);
   });
 }
 
@@ -164,11 +169,6 @@ async function getGoogleEvent(auth, eventId) {
     calendarId: 'primary',
     eventId: eventId
   });
-  // .then(res => {
-  //     //console.log('googleEvent', res.data);
-  //     return res;
-  // })
-  // .catch(err => console.log('there was an error', err));
 }
 /**
  * Lists the next MAX_RESULTS events on the user's primary calendar.
@@ -201,7 +201,7 @@ async function getMobilizeEvents() {
   return axios.get('https://api.mobilize.us/v1/organizations/2529/events?timeslot_start=gte_now');
 }
 
-async function createEvent(auth, mobilizeEvent) {
+async function createGoogleEvent(auth, mobilizeEvent) {
   var event = {
     'id': `eid${mobilizeEvent.id}tsid${mobilizeEvent.timeslot_id}`,
     'summary': mobilizeEvent.title,
@@ -224,6 +224,13 @@ async function createEvent(auth, mobilizeEvent) {
     'source': {
       'url': mobilizeEvent.browser_url
     },
+    'extendedProperties': {
+      'private': {
+        'source': 'Mobilize',
+        'created_date': mobilizeEvent.created_date,
+        'modified_date': mobilizeEvent.modified_date
+      }
+    }
     // 'organizer': {
     //   'email': string,
     //   'displayName': string,
@@ -231,22 +238,20 @@ async function createEvent(auth, mobilizeEvent) {
   };
 
   //console.log(event);
-  var {data} = await getGoogleEvent(auth, event.id);
-  console.log('googleEvent', data);
-  return;
-  const calendar = google.calendar({version: 'v3', auth});
-  calendar.events.insert({
-    auth: auth,
-    calendarId: 'primary',
-    resource: event,
-  }, function(err, event) {
-    if (err) {
-      console.log('There was an error contacting the Calendar service: ' + err);
-      return;
+  try {
+    var {data} = await getGoogleEvent(auth, event.id);
+    console.log('response', data);
+  } catch(error) {
+    console.log(`Event ${event.id} not found`);
+    console.log('error', `${error.response.status}: ${error.response.statusText}`);
+
+    if(error.response.status == 404) {
+      var response = await insertGoogleEvent(auth, event);
+      console.log('new event', response.data);
+    } else {
+      // do an update here if the modified_date is different that that on the extendedProperties
     }
-    console.log('Event created: %s', event.htmlLink);
-  });
-  
+  }
 }
 // [END calendar_quickstart]
 
@@ -254,3 +259,12 @@ module.exports = {
   SCOPES,
   listEvents: listGoogleEvents,
 };
+async function insertGoogleEvent(auth, event) {
+  const calendar = google.calendar({ version: 'v3', auth });
+  return calendar.events.insert({
+    auth: auth,
+    calendarId: 'primary',
+    resource: event,
+  });
+}
+
