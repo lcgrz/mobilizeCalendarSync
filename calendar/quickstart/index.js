@@ -22,64 +22,90 @@ const {google} = require('googleapis');
 const _ = require('lodash');
 
 // If modifying these scopes, delete token.json.
-const SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
+const SCOPES = ['https://www.googleapis.com/auth/calendar'];
 // The file token.json stores the user's access and refresh tokens, and is
 // created automatically when the authorization flow completes for the first
 // time.
 const TOKEN_PATH = 'token.json';
-const MAX_RESULTS = 10;
-const MOBILIZE_BASE_URL = 'https://api.mobilize.us/v1/organizations/2529/events';
+const MAX_RESULTS = 1;
+const MOBILIZE_BASE_URL = 'https://api.mobilize.us/v1/organizations/2529/events?timeslot_start=gte_now';
 
 // Load client secrets from a local file.
 fs.readFile('credentials.json', (err, content) => {
-  if (err) return console.log('Error loading client secret file:', err);
+  if (err) {
+    return console.log('Error loading client secret file:', err);
+  }
   // Authorize a client with credentials, then call the Google Calendar API.
-  authorize(JSON.parse(content), listEvents);
+  authorize(JSON.parse(content), insertMobilizeEvents);
 });
 
-listMobilizeEvents(MOBILIZE_BASE_URL)
-.then(data => {  
-  _.forEach(data.data, (event) => {
-    _.forEach(event.timeslots, (timeslot) => {
-      var start_date = new Date(timeslot.start_date * 1000); 
-      var end_date = new Date(timeslot.end_date * 1000);
-      var {venue, address_lines, locality, region, country, postal_code} = event.location || {};
-      // console.log(event.location);
 
-      var address = '';
-      if(address_lines && address_lines.length)
-      {
-        if(address_lines.length > 1 && address_lines[1].length) {
-          address = _.join(address_lines, ' ');
-        } else {
-          address = address_lines[0];
-        }
-      }
 
-      var location = (venue ? `${venue}, ` : '') + (address ? `${address}, ` : '') +
-                      `${locality}, ${region} ${postal_code}, ${country}`;
+async function insertMobilizeEvents(auth) {
+  console.log('insertMobilizeEvents');
+  var {data} = await getMobilizeEvents(MOBILIZE_BASE_URL);
 
-      console.log({
-        'title': event.title, 
-        'summary': event.summary,
-        'description': event.description,
-        'organization_id': event.sponsor.id,
-        'organization_name': event.sponsor.name,
-        'timeslot_id': timeslot.id,
-        'start_date': start_date.toUTCString(),
-        'end_date': end_date.toUTCString(),
-        'location': location,
-        'timezone': event.timezone,
-        'event_type': event.event_type,
-        'browser_url': event.browser_url,
-        'contact': event.contact
-      });
-    })
+  console.log(MOBILIZE_BASE_URL);
 
+  var events = [];
+  events.push(_.first(data.data));
+
+  console.log('events', events);
+
+  _.forEach(events, (event) => {
+    destructureEvent(event, auth);
   });
-});
+}
 
 
+
+function destructureEvent(event, auth) {
+  _.forEach(event.timeslots, (timeslot) => {
+    var start_date = new Date(timeslot.start_date * 1000);
+    var end_date = new Date(timeslot.end_date * 1000);
+    var { venue, address_lines, locality, region, country, postal_code } = event.location || {};
+    var address = '';
+    if (address_lines && address_lines.length) {
+      if (address_lines.length > 1 && address_lines[1].length) {
+        address = _.join(address_lines, ' ');
+      }
+      else {
+        address = address_lines[0];
+      }
+    }
+    var location = '';
+    if (venue.includes('private')) {
+      location = venue;
+    }
+    else {
+      location = (venue ? `${venue}, ` : '') +
+        (address ? `${address}, ` : '') +
+        (locality ? `${locality}, ` : '') +
+        (region ? `${region} ` : '') +
+        (postal_code ? `${postal_code}, ` : '') +
+        (country ? `${country}` : '');
+    }
+    var flattenedEvent = {
+      'id': event.id,
+      'title': event.title,
+      'summary': event.summary,
+      'description': event.description,
+      'organization_id': event.sponsor.id,
+      'organization_name': event.sponsor.name,
+      'timeslot_id': timeslot.id,
+      'start_date': start_date.toISOString(),
+      'end_date': end_date.toISOString(),
+      'location': location,
+      'timezone': event.timezone,
+      'event_type': event.event_type,
+      'browser_url': event.browser_url,
+      'contact': event.contact
+    };
+    console.log(flattenedEvent);
+
+    createEvent(auth, flattenedEvent);
+  });
+}
 
 /**
  * Create an OAuth2 client with the given credentials, and then execute the
@@ -94,7 +120,9 @@ function authorize(credentials, callback) {
 
   // Check if we have previously stored a token.
   fs.readFile(TOKEN_PATH, (err, token) => {
-    if (err) return getAccessToken(oAuth2Client, callback);
+    if (err) {
+      return getAccessToken(oAuth2Client, callback);
+    }
     oAuth2Client.setCredentials(JSON.parse(token));
     callback(oAuth2Client);
   });
@@ -135,7 +163,7 @@ function getAccessToken(oAuth2Client, callback) {
  * Lists the next MAX_RESULTS events on the user's primary calendar.
  * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
  */
-function listEvents(auth) {
+function listGoogleEvents(auth) {
   const calendar = google.calendar({version: 'v3', auth});
   calendar.events.list({
     calendarId: 'primary',
@@ -158,15 +186,59 @@ function listEvents(auth) {
   });
 }
 
-function listMobilizeEvents(url) {
-  return axios.get(url).then(response => {
-    // returning the data here allows the caller to get it through another .then(...)
-    return response.data
-  })
+async function getMobilizeEvents(url) {
+  return axios.get(url)
+    .then((response) => Promise.resolve(response));
+}
+
+function createEvent(auth, mobilizeEvent) {
+  const calendar = google.calendar({version: 'v3', auth});
+  var event = {
+    'id': `eid${mobilizeEvent.id}tsid${mobilizeEvent.timeslot_id}`,
+    'summary': mobilizeEvent.title,
+    'location': mobilizeEvent.location,
+    'description': mobilizeEvent.description,
+    'start': {
+      'dateTime': mobilizeEvent.start_date,
+      'timeZone': mobilizeEvent.timezone,
+    },
+    'end': {
+      'dateTime': mobilizeEvent.end_date,
+      'timeZone': mobilizeEvent.timezone,
+    },
+    'recurrence': [],
+    'attendees': [],
+    'reminders': {
+      'useDefault': false,
+      'overrides': [],
+    },
+    'source': {
+      'url': mobilizeEvent.browser_url
+    },
+    // 'organizer': {
+    //   'email': string,
+    //   'displayName': string,
+    // }  
+  };
+
+  console.log(event);
+  
+  calendar.events.insert({
+    auth: auth,
+    calendarId: 'primary',
+    resource: event,
+  }, function(err, event) {
+    if (err) {
+      console.log('There was an error contacting the Calendar service: ' + err);
+      return;
+    }
+    console.log('Event created: %s', event.htmlLink);
+  });
+  
 }
 // [END calendar_quickstart]
 
 module.exports = {
   SCOPES,
-  listEvents,
+  listEvents: listGoogleEvents,
 };
