@@ -28,7 +28,6 @@ const SCOPES = ['https://www.googleapis.com/auth/calendar'];
 // time.
 const TOKEN_PATH = 'token.json';
 const MAX_RESULTS = 1;
-const MOBILIZE_BASE_URL = 'https://api.mobilize.us/v1/organizations/2529/events?timeslot_start=gte_now';
 
 // Load client secrets from a local file.
 fs.readFile('credentials.json', (err, content) => {
@@ -43,9 +42,7 @@ fs.readFile('credentials.json', (err, content) => {
 
 async function insertMobilizeEvents(auth) {
   console.log('insertMobilizeEvents');
-  var {data} = await getMobilizeEvents(MOBILIZE_BASE_URL);
-
-  console.log(MOBILIZE_BASE_URL);
+  var {data} = await getMobilizeEvents();
 
   var events = [];
   events.push(_.first(data.data));
@@ -101,7 +98,8 @@ function destructureEvent(event, auth) {
       'browser_url': event.browser_url,
       'contact': event.contact
     };
-    console.log(flattenedEvent);
+    console.log('flattenedEvent', flattenedEvent);
+
 
     createEvent(auth, flattenedEvent);
   });
@@ -159,6 +157,19 @@ function getAccessToken(oAuth2Client, callback) {
   });
 }
 
+async function getGoogleEvent(auth, eventId) {
+
+  const calendar = google.calendar({version: 'v3', auth});
+  return calendar.events.get({
+    calendarId: 'primary',
+    eventId: eventId
+  });
+  // .then(res => {
+  //     //console.log('googleEvent', res.data);
+  //     return res;
+  // })
+  // .catch(err => console.log('there was an error', err));
+}
 /**
  * Lists the next MAX_RESULTS events on the user's primary calendar.
  * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
@@ -186,13 +197,11 @@ function listGoogleEvents(auth) {
   });
 }
 
-async function getMobilizeEvents(url) {
-  return axios.get(url)
-    .then((response) => Promise.resolve(response));
+async function getMobilizeEvents() {
+  return axios.get('https://api.mobilize.us/v1/organizations/2529/events?timeslot_start=gte_now');
 }
 
-function createEvent(auth, mobilizeEvent) {
-  const calendar = google.calendar({version: 'v3', auth});
+async function createEvent(auth, mobilizeEvent) {
   var event = {
     'id': `eid${mobilizeEvent.id}tsid${mobilizeEvent.timeslot_id}`,
     'summary': mobilizeEvent.title,
@@ -221,8 +230,11 @@ function createEvent(auth, mobilizeEvent) {
     // }  
   };
 
-  console.log(event);
-  
+  //console.log(event);
+  var {data} = await getGoogleEvent(auth, event.id);
+  console.log('googleEvent', data);
+  return;
+  const calendar = google.calendar({version: 'v3', auth});
   calendar.events.insert({
     auth: auth,
     calendarId: 'primary',
