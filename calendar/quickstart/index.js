@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 // [START calendar_quickstart]
+const sleep = require('sleep-promise');
 const axios = require('axios');
 const fs = require('fs');
 const readline = require('readline');
@@ -30,6 +31,7 @@ const TOKEN_PATH = 'token.json';
 const MAX_RESULTS = 1;
 
 // Load client secrets from a local file.
+(async() => {
 fs.readFile('credentials.json', (err, content) => {
   if (err) {
     return console.log('Error loading client secret file:', err);
@@ -37,24 +39,37 @@ fs.readFile('credentials.json', (err, content) => {
   // Authorize a client with credentials, then call the Google Calendar API.
   authorize(JSON.parse(content), insertMobilizeEvents);
 });
+})();
 
 async function insertMobilizeEvents(auth) {
-  console.log('insertMobilizeEvents');
-  var events = await getMobilizeEvents();
-  console.log('events', events);
 
+  var mobilizeUrl = 'https://api.mobilize.us/v1/organizations/2529/events?timeslot_start=gte_now';
+  var events = await getAllMobilizeEvents(mobilizeUrl, events);
+  var eventCount = 0;
+  var shiftCount = 0;
+
+  console.log('events from caller', events.length);
+  
   _.forEach(events, (event) => {
-    console.log(event.title);
+
     if(!(event.title.toLowerCase().includes('maine') || event.title.toLowerCase().includes('susan collins'))) {
       return;
     }
-    _.forEach(event.timeslots, (timeslot) => {
-      var flattenedEvent = getDestructuredEvent(event, timeslot);
-      //console.log('flattenedEvent', flattenedEvent);
-
-      createOrUpdateGoogleEvent(auth, flattenedEvent);
-    });
+    console.log(`${event.id}: ${event.title}`);
+  //   _.forEach(event.timeslots, (timeslot) => {
+  //     try {
+  //       var flattenedEvent = getDestructuredEvent(event, timeslot);
+  //       createOrUpdateGoogleEvent(auth, flattenedEvent);
+  //       shiftCount++;
+  //     } catch(error) {
+  //       console.log(`There was an error: ${error}`);
+  //     }
+  //     sleep(5000);
+  //   });
+  //   eventCount++;
   });
+
+  console.log(`Added ${eventCount} events with a total of ${shiftCount} shifts`)
 }
 
 function getDestructuredEvent(event, timeslot) {
@@ -69,7 +84,7 @@ function getDestructuredEvent(event, timeslot) {
       if (address_lines.length > 1 && address_lines[1].length) {
         address = _.join(address_lines, ' ');
       }
-      else {
+      else if(!address_lines[0].includes('private')){
         address = address_lines[0];
       }
     }
@@ -102,7 +117,7 @@ function getDestructuredEvent(event, timeslot) {
       'browser_url': event.browser_url,
       'contact': event.contact
     };
-    console.log('flattenedEvent', flattenedEvent);
+    //console.log('flattenedEvent', flattenedEvent);
 
     return flattenedEvent;
 }
@@ -147,7 +162,9 @@ function getAccessToken(oAuth2Client, callback) {
   rl.question('Enter the code from that page here: ', (code) => {
     rl.close();
     oAuth2Client.getToken(code, (err, token) => {
-      if (err) return console.error('Error retrieving access token', err);
+      if (err) {
+        return console.error('Error retrieving access token', err);
+      }
       oAuth2Client.setCredentials(token);
       // Store the token to disk for later program executions
       fs.writeFile(TOKEN_PATH, JSON.stringify(token), (err) => {
@@ -197,28 +214,36 @@ function listGoogleEvents(auth) {
   });
 }
 
-async function getMobilizeEvents(index) {
-  return axios.get('https://api.mobilize.us/v1/organizations/2529/events?timeslot_start=gte_now')
-          .then((response) => {
-              if(typeof index !== 'undefined') {
-                return [response.data.data[index]];
-              } else {
-                return response.data.data;
-              }
-          });
+async function getMobilizeEvents(url) {
+  return axios.get(url);
+}
+
+async function getAllMobilizeEvents(url, index) {  
+  var response = await getMobilizeEvents(url);
+
+  if(typeof index !== 'undefined') {
+    return response.data.data[index];
+  } else {
+    console.log(`${response.data.data.length} events returned`);
+    if(response.data.next) {
+      return response.data.data.concat(await getAllMobilizeEvents(response.data.next));
+    } else {
+      return response.data.data;
+    }
+  }
+
 }
 
 async function createOrUpdateGoogleEvent(auth, mobilizeEvent) {
   var event = createGoogleEvent(mobilizeEvent);
 
-
   try {
     var data = await getGoogleEvent(auth, event.id);
-    console.log('getGoogleEvent', data);
+    //console.log('getGoogleEvent from caller', data);
 
     if(data.extendedProperties.modified_date != event.modified_date) {     
-      var updatedEvent = updateGoogleEvent(auth, event);
-      console.log('updatedEvent', updatedEvent);
+      var updatedEvent = await updateGoogleEvent(auth, event);
+      console.log('updateGoogleEvent from caller', updatedEvent);
     } else {
       console.log(`Event ${event.id} has not changed.`)
     }
@@ -229,12 +254,13 @@ async function createOrUpdateGoogleEvent(auth, mobilizeEvent) {
     if(error.response.status == 404) {
       console.log(' Inserting new event...');
       var insertedEvent = await insertGoogleEvent(auth, event);
-      console.log('insertedEvent', insertedEvent);
+      console.log('insertGoogleEvent from caller', insertedEvent);
     } else {
       // do an update here if the modified_date is different that that on the extendedProperties
-      console.log('And unknown error occurred: ', error.response);
+      console.log('An unknown error occurred: ', error.response);
     }
   }
+  return;
 }
 
 function createGoogleEvent(mobilizeEvent) {
@@ -269,7 +295,7 @@ function createGoogleEvent(mobilizeEvent) {
     }
   };
 
-  //console.log(event);
+  //console.log('createGoogleEvent', event);
 
   return event;
 }
@@ -281,16 +307,14 @@ async function updateGoogleEvent(auth, event) {
     calendarId: 'primary',
     resource: event,
   })
-  .then((response) => { 
-    console.log('update response'); 
-    return response.data;
-  });
+  .then((response) => { return response.data; });
 }
 
 module.exports = {
   SCOPES,
   listEvents: listGoogleEvents,
 };
+
 async function insertGoogleEvent(auth, event) {
   const calendar = google.calendar({ version: 'v3', auth });
   return calendar.events.insert({
