@@ -1,21 +1,3 @@
-/**
- * @license
- * Copyright Google Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     https://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-// [START calendar_quickstart]
-const sleep = require('sleep-promise');
 const axios = require('axios');
 const fs = require('fs');
 const readline = require('readline');
@@ -28,7 +10,8 @@ const SCOPES = ['https://www.googleapis.com/auth/calendar'];
 // created automatically when the authorization flow completes for the first
 // time.
 const TOKEN_PATH = 'token.json';
-const MAX_RESULTS = 1;
+const MAX_RESULTS = 10;
+const CALENDAR_ID = 'ssip82dtd0kvm9nrmc9qvmsae0@group.calendar.google.com';
 
 // Load client secrets from a local file.
 (async() => {
@@ -37,7 +20,7 @@ fs.readFile('credentials.json', (err, content) => {
     return console.log('Error loading client secret file:', err);
   }
   // Authorize a client with credentials, then call the Google Calendar API.
-  authorize(JSON.parse(content), insertMobilizeEvents);
+  authorize(JSON.parse(content), listGoogleEvents);
 });
 })();
 
@@ -50,24 +33,22 @@ async function insertMobilizeEvents(auth) {
 
   console.log('events from caller', events.length);
   
-  _.forEach(events, (event) => {
-
+  for(let event of events)
+  {
     if(!(event.title.toLowerCase().includes('maine') || event.title.toLowerCase().includes('susan collins'))) {
-      return;
+      continue;
     }
     console.log(`${event.id}: ${event.title}`);
-  //   _.forEach(event.timeslots, (timeslot) => {
-  //     try {
-  //       var flattenedEvent = getDestructuredEvent(event, timeslot);
-  //       createOrUpdateGoogleEvent(auth, flattenedEvent);
-  //       shiftCount++;
-  //     } catch(error) {
-  //       console.log(`There was an error: ${error}`);
-  //     }
-  //     sleep(5000);
-  //   });
-  //   eventCount++;
-  });
+    for(let timeslot of event.timeslots) {
+      setTimeout(() => {
+        var flattenedEvent = getDestructuredEvent(event, timeslot);
+        createOrUpdateGoogleEvent(auth, flattenedEvent);
+      }, 1000 * shiftCount);
+
+      shiftCount++;
+    };
+    eventCount++;
+  }
 
   console.log(`Added ${eventCount} events with a total of ${shiftCount} shifts`)
 }
@@ -179,7 +160,7 @@ function getAccessToken(oAuth2Client, callback) {
 async function getGoogleEvent(auth, eventId) {
   const calendar = google.calendar({version: 'v3', auth});
   return calendar.events.get({
-    calendarId: 'primary',
+    calendarId: CALENDAR_ID,
     eventId: eventId
   })
   .then((response) => {
@@ -188,13 +169,13 @@ async function getGoogleEvent(auth, eventId) {
   });
 }
 /**
- * Lists the next MAX_RESULTS events on the user's primary calendar.
+ * Lists the next MAX_RESULTS events on the user's calendar.
  * @param {google.auth.OAuth2} auth An authorized OAuth2 client.
  */
 function listGoogleEvents(auth) {
   const calendar = google.calendar({version: 'v3', auth});
   calendar.events.list({
-    calendarId: 'primary',
+    calendarId: CALENDAR_ID,
     timeMin: (new Date()).toISOString(),
     maxResults: MAX_RESULTS,
     singleEvents: true,
@@ -235,35 +216,44 @@ async function getAllMobilizeEvents(url, index) {
 }
 
 async function createOrUpdateGoogleEvent(auth, mobilizeEvent) {
-  var event = createGoogleEvent(mobilizeEvent);
+  var newEvent = mapToGoogleEvent(mobilizeEvent);
 
   try {
-    var data = await getGoogleEvent(auth, event.id);
-    //console.log('getGoogleEvent from caller', data);
+    var existingGoogleEvent = await getGoogleEvent(auth, newEvent.id);
+    //console.log('mobilizeEvent', mobilizeEvent);
+    //console.log('existingGoogleEvent', existingGoogleEvent);
+    //console.log(`Updated: ${event.id}: ${event.summary}`);
+    //console.log(`Existing: ${existingGoogleEvent.id}: ${existingGoogleEvent.summary}`);
 
-    if(data.extendedProperties.modified_date != event.modified_date) {     
-      var updatedEvent = await updateGoogleEvent(auth, event);
-      console.log('updateGoogleEvent from caller', updatedEvent);
+    console.log(`Mobilize last modified date: |${newEvent.extendedProperties.private.modified_date}`);
+    console.log(`Google last modified date: |${existingGoogleEvent.extendedProperties.private.modified_date}`);
+    //console.log('googleEvent', googleEvent);
+
+    //if(existingGoogleEvent.extendedProperties.private.modified_date != newEvent.extendedProperties.private.modified_date) { 
+    if(true) {
+      console.log('Event changed. Updating event...');  
+      var updatedGoogleEvent = await updateGoogleEvent(auth, newEvent);
+      console.log('updatedGoogleEvent', updatedGoogleEvent);
     } else {
-      console.log(`Event ${event.id} has not changed.`)
+      console.log(`Event ${newEvent.id} has not changed.`)
     }
   } catch(error) {
     //console.log(`Error retrieving event ${event.id}.`, response);
-    console.log('error', `${error.response.status}: ${error.response.statusText}`);
+    //console.log('error', `${error.response.status}: ${error.response.statusText}`);
 
-    if(error.response.status == 404) {
-      console.log(' Inserting new event...');
-      var insertedEvent = await insertGoogleEvent(auth, event);
-      console.log('insertGoogleEvent from caller', insertedEvent);
+    if(error.response && error.response.status === 404) {
+      console.log('Event not found. Inserting new event...');
+      var insertedGoogleEvent = await insertGoogleEvent(auth, newEvent);
+      console.log('insertedGoogleEvent', insertedGoogleEvent);
     } else {
       // do an update here if the modified_date is different that that on the extendedProperties
-      console.log('An unknown error occurred: ', error.response);
+      console.log('An unknown error occurred: ', error);
     }
   }
   return;
 }
 
-function createGoogleEvent(mobilizeEvent) {
+function mapToGoogleEvent(mobilizeEvent) {
   var event = {
     'id': `eid${mobilizeEvent.id}tsid${mobilizeEvent.timeslot_id}`,
     'summary': mobilizeEvent.title,
@@ -284,6 +274,7 @@ function createGoogleEvent(mobilizeEvent) {
       'overrides': [],
     },
     'source': {
+      'title': mobilizeEvent.title,
       'url': mobilizeEvent.browser_url
     },
     'extendedProperties': {
@@ -301,10 +292,12 @@ function createGoogleEvent(mobilizeEvent) {
 }
 
 async function updateGoogleEvent(auth, event) {
+  console.log(`Event ID: ${event.id}`);
   const calendar = google.calendar({ version: 'v3', auth });
   return calendar.events.update({
     auth: auth,
-    calendarId: 'primary',
+    calendarId: CALENDAR_ID,
+    eventId: event.id,
     resource: event,
   })
   .then((response) => { return response.data; });
@@ -319,7 +312,7 @@ async function insertGoogleEvent(auth, event) {
   const calendar = google.calendar({ version: 'v3', auth });
   return calendar.events.insert({
     auth: auth,
-    calendarId: 'primary',
+    calendarId: CALENDAR_ID,
     resource: event,
   })
   .then((response) => {return response.data});
