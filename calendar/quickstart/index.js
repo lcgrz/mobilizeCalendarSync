@@ -20,14 +20,16 @@ fs.readFile('credentials.json', (err, content) => {
     return console.log('Error loading client secret file:', err);
   }
   // Authorize a client with credentials, then call the Google Calendar API.
-  authorize(JSON.parse(content), listGoogleEvents);
+  authorize(JSON.parse(content), insertMobilizeEvents);
 });
 })();
 
 async function insertMobilizeEvents(auth) {
 
-  var mobilizeUrl = 'https://api.mobilize.us/v1/organizations/2529/events?timeslot_start=gte_now';
-  var events = await getAllMobilizeEvents(mobilizeUrl, events);
+  var swingLeftMaineMobilizeUrl = 'https://api.mobilize.us/v1/organizations/2529/events?timeslot_start=gte_now';
+  var swingLeftNationalMoblizeUrl = 'https://api.mobilize.us/v1/organizations/159/events?timeslot_start=gte_now';
+
+  var events = await getAllMobilizeEvents(swingLeftMaineMobilizeUrl);
   var eventCount = 0;
   var shiftCount = 0;
 
@@ -35,7 +37,7 @@ async function insertMobilizeEvents(auth) {
   
   for(let event of events)
   {
-    if(!(event.title.toLowerCase().includes('maine') || event.title.toLowerCase().includes('susan collins'))) {
+    if(!(event.title.toLowerCase().includes('maine') || event.title.toLowerCase().includes('collins'))) {
       continue;
     }
     console.log(`${event.id}: ${event.title}`);
@@ -254,11 +256,13 @@ async function createOrUpdateGoogleEvent(auth, mobilizeEvent) {
 }
 
 function mapToGoogleEvent(mobilizeEvent) {
+  var description = `<a href=\"${mobilizeEvent.browser_url}\">${mobilizeEvent.browser_url}<\/a>` + 
+                    '\n\n' + mobilizeEvent.description;
   var event = {
     'id': `eid${mobilizeEvent.id}tsid${mobilizeEvent.timeslot_id}`,
     'summary': mobilizeEvent.title,
     'location': mobilizeEvent.location,
-    'description': mobilizeEvent.description,
+    'description': description,
     'start': {
       'dateTime': mobilizeEvent.start_date,
       'timeZone': mobilizeEvent.timezone,
